@@ -1,0 +1,510 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===========================================
+// Core Tables
+// ===========================================
+
+model Tenant {
+  id              String   @id @default(uuid())
+  code            String   @unique
+  name            String
+  taxId           String?  @map("tax_id")
+  branchCode      String   @default("00000") @map("branch_code")
+  address         String?
+  phone           String?
+  email           String?
+  logoUrl         String?  @map("logo_url")
+  fiscalYearStart Int      @default(1) @map("fiscal_year_start")
+  baseCurrency    String   @default("THB") @map("base_currency")
+  plan            String   @default("basic")
+  status          String   @default("active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  users           User[]
+  branches        Branch[]
+  accounts        ChartOfAccount[]
+  journalEntries  JournalEntry[]
+  customers       Customer[]
+  vendors         Vendor[]
+  products        Product[]
+  invoices        Invoice[]
+  quotations      Quotation[]
+  bills           Bill[]
+  employees       Employee[]
+  activityLogs    ActivityLog[]
+  payments        Payment[]
+  billingNotes    BillingNote[]
+
+  @@map("tenants")
+}
+
+model User {
+  id            String    @id @default(uuid())
+  tenantId      String?   @map("tenant_id")
+  email         String
+  passwordHash  String?   @map("password_hash")
+  firstName     String?   @map("first_name")
+  lastName      String?   @map("last_name")
+  role          String    @default("user")
+  status        String    @default("active")
+  lastLoginAt   DateTime? @map("last_login_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  tenant        Tenant?   @relation(fields: [tenantId], references: [id])
+  journalEntries JournalEntry[]
+  invoices      Invoice[]
+  quotations    Quotation[]
+  payments      Payment[]
+  billingNotes  BillingNote[]
+
+  @@unique([tenantId, email])
+  @@map("users")
+}
+
+model Branch {
+  id            String  @id @default(uuid())
+  tenantId      String  @map("tenant_id")
+  code          String
+  name          String
+  address       String?
+  isHeadquarter Boolean @default(false) @map("is_headquarter")
+
+  // Relations
+  tenant        Tenant  @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, code])
+  @@map("branches")
+}
+
+// ===========================================
+// Chart of Accounts
+// ===========================================
+
+model ChartOfAccount {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  accountCode   String   @map("account_code")
+  accountName   String   @map("account_name")
+  accountType   String   @map("account_type") // asset, liability, equity, revenue, expense
+  parentId      String?  @map("parent_id")
+  level         Int      @default(1)
+  isHeader      Boolean  @default(false) @map("is_header")
+  isActive      Boolean  @default(true) @map("is_active")
+  normalBalance String   @map("normal_balance") // debit, credit
+
+  // Relations
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  parent        ChartOfAccount?  @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children      ChartOfAccount[] @relation("AccountHierarchy")
+  journalLines  JournalLine[]
+
+  @@unique([tenantId, accountCode])
+  @@map("chart_of_accounts")
+}
+
+// ===========================================
+// Journal Entries
+// ===========================================
+
+model JournalEntry {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  entryNumber   String    @map("entry_number")
+  entryDate     DateTime  @map("entry_date") @db.Date
+  journalType   String    @map("journal_type") // general, sales, purchase
+  referenceType String?   @map("reference_type")
+  referenceId   String?   @map("reference_id")
+  description   String?
+  totalDebit    Decimal   @default(0) @map("total_debit") @db.Decimal(18, 2)
+  totalCredit   Decimal   @default(0) @map("total_credit") @db.Decimal(18, 2)
+  status        String    @default("draft") // draft, posted, voided
+  postedAt      DateTime? @map("posted_at")
+  createdBy     String?   @map("created_by")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  tenant        Tenant       @relation(fields: [tenantId], references: [id])
+  user          User?        @relation(fields: [createdBy], references: [id])
+  lines         JournalLine[]
+
+  @@unique([tenantId, entryNumber])
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id              String  @id @default(uuid())
+  tenantId        String  @map("tenant_id")
+  journalEntryId  String  @map("journal_entry_id")
+  lineNumber      Int     @map("line_number")
+  accountId       String  @map("account_id")
+  description     String?
+  debitAmount     Decimal @default(0) @map("debit_amount") @db.Decimal(18, 2)
+  creditAmount    Decimal @default(0) @map("credit_amount") @db.Decimal(18, 2)
+  currency        String  @default("THB")
+  exchangeRate    Decimal @default(1) @map("exchange_rate") @db.Decimal(18, 6)
+
+  // Relations
+  journalEntry    JournalEntry   @relation(fields: [journalEntryId], references: [id])
+  account         ChartOfAccount @relation(fields: [accountId], references: [id])
+
+  @@map("journal_lines")
+}
+
+// ===========================================
+// Contacts
+// ===========================================
+
+model Customer {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  code          String
+  name          String
+  taxId         String?  @map("tax_id")
+  branchCode    String   @default("00000") @map("branch_code")
+  contactPerson String?  @map("contact_person")
+  email         String?
+  phone         String?
+  address       String?
+  creditLimit   Decimal  @default(0) @map("credit_limit") @db.Decimal(18, 2)
+  creditTerm    Int      @default(30) @map("credit_term")
+  isActive      Boolean  @default(true) @map("is_active")
+
+  // Relations
+  tenant        Tenant    @relation(fields: [tenantId], references: [id])
+  invoices      Invoice[]
+  quotations    Quotation[]
+  billingNotes  BillingNote[]
+
+  @@unique([tenantId, code])
+  @@map("customers")
+}
+
+model Vendor {
+  id            String  @id @default(uuid())
+  tenantId      String  @map("tenant_id")
+  code          String
+  name          String
+  taxId         String? @map("tax_id")
+  contactPerson String? @map("contact_person")
+  email         String?
+  phone         String?
+  address       String?
+  paymentTerm   Int     @default(30) @map("payment_term")
+  isActive      Boolean @default(true) @map("is_active")
+
+  // Relations
+  tenant        Tenant  @relation(fields: [tenantId], references: [id])
+  bills         Bill[]
+
+  @@unique([tenantId, code])
+  @@map("vendors")
+}
+
+// ===========================================
+// Products
+// ===========================================
+
+model Product {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  code          String
+  barcode       String?
+  name          String
+  categoryId    String?  @map("category_id")
+  productType   String   @default("inventory") @map("product_type")
+  baseUnit      String   @map("base_unit")
+  costPrice     Decimal  @default(0) @map("cost_price") @db.Decimal(18, 4)
+  sellingPrice  Decimal  @default(0) @map("selling_price") @db.Decimal(18, 4)
+  isVatable     Boolean  @default(true) @map("is_vatable")
+  vatRate       Decimal  @default(7.00) @map("vat_rate") @db.Decimal(5, 2)
+  costingMethod String   @default("average") @map("costing_method")
+  minStock      Decimal  @default(0) @map("min_stock") @db.Decimal(18, 4)
+  isActive      Boolean  @default(true) @map("is_active")
+
+  // Relations
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, code])
+  @@map("products")
+}
+
+// ===========================================
+// Sales Documents
+// ===========================================
+
+model Quotation {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  documentNumber  String    @map("document_number")
+  documentDate    DateTime  @map("document_date") @db.Date
+  validUntil      DateTime? @map("valid_until") @db.Date
+  customerId      String    @map("customer_id")
+  subtotal        Decimal   @default(0) @db.Decimal(18, 2)
+  discountAmount  Decimal   @default(0) @map("discount_amount") @db.Decimal(18, 2)
+  vatAmount       Decimal   @default(0) @map("vat_amount") @db.Decimal(18, 2)
+  totalAmount     Decimal   @default(0) @map("total_amount") @db.Decimal(18, 2)
+  status          String    @default("draft") // draft, sent, accepted, rejected, invoiced
+  notes           String?
+  createdBy       String?   @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  customer        Customer        @relation(fields: [customerId], references: [id])
+  user            User?           @relation(fields: [createdBy], references: [id])
+  items           QuotationItem[]
+
+  @@unique([tenantId, documentNumber])
+  @@map("quotations")
+}
+
+model QuotationItem {
+  id              String  @id @default(uuid())
+  tenantId        String  @map("tenant_id")
+  quotationId     String  @map("quotation_id")
+  lineNumber      Int     @map("line_number")
+  productId       String? @map("product_id")
+  description     String
+  details         String?
+  quantity        Decimal @db.Decimal(18, 4)
+  unitPrice       Decimal @map("unit_price") @db.Decimal(18, 4)
+  discountAmount  Decimal @default(0) @map("discount_amount") @db.Decimal(18, 2)
+  amount          Decimal @db.Decimal(18, 2)
+  vatRate         Decimal @default(7.00) @map("vat_rate") @db.Decimal(5, 2)
+
+  // Relations
+  quotation       Quotation @relation(fields: [quotationId], references: [id])
+
+  @@map("quotation_items")
+}
+
+model Invoice {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  documentNumber  String    @map("document_number")
+  documentDate    DateTime  @map("document_date") @db.Date
+  documentType    String    @map("document_type") // invoice, tax_invoice, credit_note
+  customerId      String    @map("customer_id")
+  subtotal        Decimal   @default(0) @db.Decimal(18, 2)
+  discountAmount  Decimal   @default(0) @map("discount_amount") @db.Decimal(18, 2)
+  vatAmount       Decimal   @default(0) @map("vat_amount") @db.Decimal(18, 2)
+  totalAmount     Decimal   @default(0) @map("total_amount") @db.Decimal(18, 2)
+  dueDate         DateTime? @map("due_date") @db.Date
+  paidAmount      Decimal   @default(0) @map("paid_amount") @db.Decimal(18, 2)
+  status          String    @default("draft")
+  paymentStatus   String    @default("unpaid") @map("payment_status")
+  journalEntryId  String?   @map("journal_entry_id")
+  createdBy       String?   @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  tenant          Tenant    @relation(fields: [tenantId], references: [id])
+  customer        Customer  @relation(fields: [customerId], references: [id])
+  user            User?     @relation(fields: [createdBy], references: [id])
+  items           InvoiceItem[]
+  payments        Payment[]
+  billingNoteItems BillingNoteItem[]
+
+  @@unique([tenantId, documentNumber])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id              String  @id @default(uuid())
+  tenantId        String  @map("tenant_id")
+  invoiceId       String  @map("invoice_id")
+  lineNumber      Int     @map("line_number")
+  productId       String? @map("product_id")
+  description     String
+  quantity        Decimal @db.Decimal(18, 4)
+  unitPrice       Decimal @map("unit_price") @db.Decimal(18, 4)
+  discountAmount  Decimal @default(0) @map("discount_amount") @db.Decimal(18, 2)
+  amount          Decimal @db.Decimal(18, 2)
+  vatRate         Decimal @default(7.00) @map("vat_rate") @db.Decimal(5, 2)
+
+  // Relations
+  invoice         Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@map("invoice_items")
+}
+
+model BillingNote {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  documentNumber  String    @map("document_number") // BN-202401-001
+  documentDate    DateTime  @map("document_date") @db.Date
+  dueDate         DateTime  @map("due_date") @db.Date // Payment expected by
+  customerId      String    @map("customer_id")
+  totalAmount     Decimal   @default(0) @map("total_amount") @db.Decimal(18, 2)
+  status          String    @default("draft") // draft, sent, paid, voided
+  notes           String?
+  createdBy       String?   @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  customer        Customer          @relation(fields: [customerId], references: [id])
+  user            User?             @relation(fields: [createdBy], references: [id])
+  items           BillingNoteItem[]
+
+  @@unique([tenantId, documentNumber])
+  @@map("billing_notes")
+}
+
+model BillingNoteItem {
+  id            String      @id @default(uuid())
+  tenantId      String      @map("tenant_id")
+  billingNoteId String      @map("billing_note_id")
+  invoiceId     String      @map("invoice_id")
+  amount        Decimal     @db.Decimal(18, 2) // Amount from invoice included in this note
+
+  // Relations
+  billingNote   BillingNote @relation(fields: [billingNoteId], references: [id])
+  invoice       Invoice     @relation(fields: [invoiceId], references: [id])
+
+  @@map("billing_note_items")
+}
+
+// ===========================================
+// Purchase Documents
+// ===========================================
+
+model Bill {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  documentNumber  String    @map("document_number")
+  documentDate    DateTime  @map("document_date") @db.Date
+  vendorId        String    @map("vendor_id")
+  vendorInvoiceNo String?   @map("vendor_invoice_no")
+  subtotal        Decimal   @default(0) @db.Decimal(18, 2)
+  vatAmount       Decimal   @default(0) @map("vat_amount") @db.Decimal(18, 2)
+  whtAmount       Decimal   @default(0) @map("wht_amount") @db.Decimal(18, 2)
+  totalAmount     Decimal   @default(0) @map("total_amount") @db.Decimal(18, 2)
+  dueDate         DateTime? @map("due_date") @db.Date
+  paidAmount      Decimal   @default(0) @map("paid_amount") @db.Decimal(18, 2)
+  status          String    @default("draft")
+  journalEntryId  String?   @map("journal_entry_id")
+
+  // Relations
+  tenant          Tenant    @relation(fields: [tenantId], references: [id])
+  vendor          Vendor    @relation(fields: [vendorId], references: [id])
+  items           BillItem[]
+  payments        Payment[]
+
+  @@unique([tenantId, documentNumber])
+  @@map("bills")
+}
+
+model BillItem {
+  id              String  @id @default(uuid())
+  tenantId        String  @map("tenant_id")
+  billId          String  @map("bill_id")
+  lineNumber      Int     @map("line_number")
+  productId       String? @map("product_id")
+  description     String
+  quantity        Decimal @db.Decimal(18, 4)
+  unitPrice       Decimal @map("unit_price") @db.Decimal(18, 4)
+  amount          Decimal @db.Decimal(18, 2)
+  vatRate         Decimal @default(7.00) @map("vat_rate") @db.Decimal(5, 2)
+
+  // Relations
+  bill            Bill    @relation(fields: [billId], references: [id])
+
+  @@map("bill_items")
+}
+
+// ===========================================
+// Payroll
+// ===========================================
+
+model Employee {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  employeeCode  String    @map("employee_code")
+  firstName     String    @map("first_name")
+  lastName      String    @map("last_name")
+  idCardNumber  String?   @map("id_card_number")
+  department    String?
+  position      String?
+  salaryType    String    @default("monthly") @map("salary_type")
+  salaryAmount  Decimal   @default(0) @map("salary_amount") @db.Decimal(18, 2)
+  bankAccount   String?   @map("bank_account")
+  startDate     DateTime? @map("start_date") @db.Date
+  isActive      Boolean   @default(true) @map("is_active")
+
+  // Relations
+  tenant        Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, employeeCode])
+  @@map("employees")
+}
+
+// ===========================================
+// Audit & System
+// ===========================================
+
+model ActivityLog {
+  id          String   @id @default(uuid())
+  tenantId    String?  @map("tenant_id")
+  userId      String?  @map("user_id")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  oldValues   Json?    @map("old_values")
+  newValues   Json?    @map("new_values")
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
+
+  @@map("activity_logs")
+}
+
+// ===========================================
+// Payments (Receipts & Vouchers)
+// ===========================================
+
+model Payment {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  documentNumber  String   @map("document_number") // RC-xxx (Receipt), PV-xxx (Payment Voucher)
+  paymentDate     DateTime @map("payment_date") @db.Date
+  paymentMethod   String   @map("payment_method") // cash, bank_transfer
+  paymentType     String   @map("payment_type") // receive, pay
+  
+  // Link to Documents (Optional 1-to-1 for MVP)
+  invoiceId       String?  @map("invoice_id")
+  billId          String?  @map("bill_id")
+
+  amount          Decimal  @db.Decimal(18, 2)
+  notes           String?
+  
+  status          String   @default("draft") // draft, posted, voided
+  journalEntryId  String?  @map("journal_entry_id")
+  createdBy       String?  @map("created_by")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  invoice         Invoice? @relation(fields: [invoiceId], references: [id])
+  bill            Bill?    @relation(fields: [billId], references: [id])
+  user            User?    @relation(fields: [createdBy], references: [id])
+
+  @@unique([tenantId, documentNumber])
+  @@map("payments")
+}
+
